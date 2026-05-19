@@ -1,0 +1,38 @@
+.printable-receipt {
+  display: none;
+}
+
+@media print {
+  /* Hide all UI elements */
+  body > * {
+    display: none !important;
+  }
+  
+  /* Show only the receipt */
+  body .app-layout .app-body .main-content .printable-receipt,
+  .printable-receipt {
+    display: block !important;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: white !important;
+    color: black !important;
+    z-index: 999999;
+    padding: 20mm;
+    box-sizing: border-box;
+  }
+
+  /* Reset body colors for print */
+  body {
+    background: white !important;
+    margin: 0;
+    padding: 0;
+  }
+  
+  @page {
+    margin: 0;
+    size: A4;
+  }
+}
