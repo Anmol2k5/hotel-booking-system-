@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createBooking: (booking) => ipcRenderer.invoke('db:createBooking', booking),
     upsertRooms: (rooms) => ipcRenderer.invoke('db:upsertRooms', rooms),
     getSyncQueue: () => ipcRenderer.invoke('db:getSyncQueue'),
-    clearSyncQueueItem: (id) => ipcRenderer.invoke('db:clearSyncQueueItem', id)
+    clearSyncQueueItem: (id) => ipcRenderer.invoke('db:clearSyncQueueItem', id),
+    updateBookingStatus: (id, status) => ipcRenderer.invoke('db:updateBookingStatus', id, status),
+    updateRoomStatus: (id, status) => ipcRenderer.invoke('db:updateRoomStatus', id, status)
   }
 })

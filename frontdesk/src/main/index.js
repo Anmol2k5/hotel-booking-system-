@@ -43,6 +43,8 @@ function createWindow() {
   ipcMain.handle('db:upsertRooms', (_, rooms) => dbApi.upsertRooms(rooms))
   ipcMain.handle('db:getSyncQueue', () => dbApi.getSyncQueue())
   ipcMain.handle('db:clearSyncQueueItem', (_, id) => dbApi.clearSyncQueueItem(id))
+  ipcMain.handle('db:updateBookingStatus', (_, id, status) => dbApi.updateBookingStatus(id, status))
+  ipcMain.handle('db:updateRoomStatus', (_, id, status) => dbApi.updateRoomStatus(id, status))
 }
 
 app.whenReady().then(createWindow)

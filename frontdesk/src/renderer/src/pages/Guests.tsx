@@ -1,18 +1,74 @@
-import { Search, Plus, Phone, Mail } from 'lucide-react'
-import { useState } from 'react'
+import { Search, Plus, Phone, Mail, User } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import type { LocalBooking } from '../global'
 
-const guests = [
-  { id: 'G-001', name: 'Rajesh Kumar', phone: '+91 98765 43210', email: 'rajesh@email.com', city: 'Mumbai', stays: 4, lastStay: '2026-05-06', spent: '₹42,600', vip: true },
-  { id: 'G-002', name: 'Priya Sharma', phone: '+91 87654 32109', email: 'priya@email.com', city: 'Delhi', stays: 2, lastStay: '2026-05-06', spent: '₹25,800', vip: false },
-  { id: 'G-003', name: 'Amit Singh', phone: '+91 76543 21098', email: 'amit@email.com', city: 'Pune', stays: 7, lastStay: '2026-05-05', spent: '₹78,400', vip: true },
-  { id: 'G-004', name: 'Neha Patel', phone: '+91 65432 10987', email: 'neha@email.com', city: 'Bangalore', stays: 1, lastStay: '2026-05-04', spent: '₹9,200', vip: false },
-  { id: 'G-005', name: 'Vikram Rao', phone: '+91 54321 09876', email: 'vikram@email.com', city: 'Chennai', stays: 3, lastStay: '2026-05-03', spent: '₹34,100', vip: false },
-]
+interface GuestSummary {
+  id: string
+  name: string
+  phone: string
+  email: string
+  city: string
+  stays: number
+  lastStay: string
+  spent: number
+  vip: boolean
+}
 
 export default function Guests() {
   const [search, setSearch] = useState('')
+  const [bookings, setBookings] = useState<LocalBooking[]>([])
+  const [guestsList, setGuestsList] = useState<GuestSummary[]>([])
 
-  const filtered = guests.filter(g =>
+  useEffect(() => {
+    window.electronAPI.db.getBookings().then(setBookings)
+    const interval = setInterval(() => {
+      window.electronAPI.db.getBookings().then(setBookings)
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    // Group bookings by guest_name and guest_phone
+    const guestMap: Record<string, GuestSummary> = {}
+
+    bookings.forEach(b => {
+      const key = `${b.guest_name.trim().toLowerCase()}-${b.guest_phone.trim()}`
+      
+      const checkIn = new Date(b.check_in_date)
+      const checkOut = new Date(b.check_out_date)
+      const nights = Math.max(1, Math.round((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)))
+      const bookingCost = b.room_rate * nights
+
+      if (!guestMap[key]) {
+        guestMap[key] = {
+          id: b.guest_id || `G-${Math.floor(1000 + Math.random() * 9000)}`,
+          name: b.guest_name,
+          phone: b.guest_phone,
+          email: `${b.guest_name.toLowerCase().replace(/\s+/g, '')}@example.com`,
+          city: 'In-house Guest',
+          stays: 0,
+          lastStay: b.check_in_date,
+          spent: 0,
+          vip: false
+        }
+      }
+
+      const g = guestMap[key]
+      g.stays += 1
+      g.spent += bookingCost
+      if (new Date(b.check_in_date) > new Date(g.lastStay)) {
+        g.lastStay = b.check_in_date
+      }
+      // If they stayed more than 3 times or spent more than 30,000, mark as VIP
+      if (g.stays >= 3 || g.spent >= 30000) {
+        g.vip = true
+      }
+    })
+
+    setGuestsList(Object.values(guestMap))
+  }, [bookings])
+
+  const filtered = guestsList.filter(g =>
     g.name.toLowerCase().includes(search.toLowerCase()) ||
     g.phone.includes(search) ||
     g.email.toLowerCase().includes(search.toLowerCase())
@@ -23,16 +79,13 @@ export default function Guests() {
       <div className="page-header">
         <div>
           <div className="page-title">Guests</div>
-          <div className="page-subtitle">{guests.length} registered guests</div>
+          <div className="page-subtitle">{guestsList.length} registered guests</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <div className="search-bar">
             <Search size={14} />
             <input placeholder="Search guests..." value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-          <button className="btn btn-primary btn-sm">
-            <Plus size={14} /> Add Guest
-          </button>
         </div>
       </div>
 
@@ -79,10 +132,16 @@ export default function Guests() {
 
             <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 12, borderTop: '1px solid var(--border-subtle)', fontSize: 12 }}>
               <span style={{ color: 'var(--text-muted)' }}>{g.stays} stays · Last: {g.lastStay}</span>
-              <span style={{ color: 'var(--success)', fontWeight: 600 }}>{g.spent}</span>
+              <span style={{ color: 'var(--success)', fontWeight: 600 }}>₹{g.spent.toLocaleString('en-IN')}</span>
             </div>
           </div>
         ))}
+        {filtered.length === 0 && (
+          <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
+            <User size={32} />
+            <p>No guests found</p>
+          </div>
+        )}
       </div>
     </>
   )

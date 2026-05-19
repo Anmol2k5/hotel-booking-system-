@@ -95,8 +95,41 @@ const dbApi = {
     transaction(rooms);
   },
 
+  updateBookingStatus: (id, status) => {
+    const stmt = db.prepare('UPDATE bookings SET status = ?, sync_status = \'pending\' WHERE id = ?');
+    const syncStmt = db.prepare(`
+      INSERT INTO sync_queue (action, table_name, record_id, payload, created_at)
+      VALUES ('UPDATE', 'bookings', ?, ?, ?)
+    `);
+
+    const transaction = db.transaction((bookingId, newStatus) => {
+      stmt.run(newStatus, bookingId);
+      syncStmt.run(bookingId, JSON.stringify({ status: newStatus }), new Date().toISOString());
+    });
+
+    transaction(id, status);
+    return { id, status };
+  },
+
+  updateRoomStatus: (id, status) => {
+    const stmt = db.prepare('UPDATE rooms SET status = ? WHERE id = ?');
+    const syncStmt = db.prepare(`
+      INSERT INTO sync_queue (action, table_name, record_id, payload, created_at)
+      VALUES ('UPDATE', 'rooms', ?, ?, ?)
+    `);
+
+    const transaction = db.transaction((roomId, newStatus) => {
+      stmt.run(newStatus, roomId);
+      syncStmt.run(roomId, JSON.stringify({ status: newStatus }), new Date().toISOString());
+    });
+
+    transaction(id, status);
+    return { id, status };
+  },
+
   getSyncQueue: () => db.prepare('SELECT * FROM sync_queue ORDER BY id ASC').all(),
   clearSyncQueueItem: (id) => db.prepare('DELETE FROM sync_queue WHERE id = ?').run(id)
 };
 
 module.exports = { db, initDb, dbApi };
+

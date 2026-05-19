@@ -1,23 +1,7 @@
-import { BedDouble, Users, LogIn, LogOut, TrendingUp, CalendarCheck, Wrench, Clock } from 'lucide-react'
-
-const rooms = [
-  { number: '101', type: 'Deluxe', status: 'occupied', guest: 'Rajesh Kumar' },
-  { number: '102', type: 'Standard', status: 'available', guest: null },
-  { number: '103', type: 'Suite', status: 'checkout', guest: 'Priya Sharma' },
-  { number: '104', type: 'Standard', status: 'available', guest: null },
-  { number: '105', type: 'Deluxe', status: 'occupied', guest: 'Amit Singh' },
-  { number: '106', type: 'Standard', status: 'maintenance', guest: null },
-  { number: '107', type: 'Suite', status: 'reserved', guest: 'Neha Patel' },
-  { number: '108', type: 'Standard', status: 'available', guest: null },
-  { number: '201', type: 'Deluxe', status: 'occupied', guest: 'Vikram Rao' },
-  { number: '202', type: 'Standard', status: 'available', guest: null },
-  { number: '203', type: 'Suite', status: 'occupied', guest: 'Sunita Desai' },
-  { number: '204', type: 'Deluxe', status: 'available', guest: null },
-  { number: '205', type: 'Standard', status: 'checkout', guest: 'Ravi Mehta' },
-  { number: '206', type: 'Standard', status: 'available', guest: null },
-  { number: '207', type: 'Suite', status: 'reserved', guest: 'Kavya Nair' },
-  { number: '208', type: 'Deluxe', status: 'available', guest: null },
-]
+import { useState, useEffect } from 'react'
+import { BedDouble, Users, LogIn, LogOut, CalendarCheck, Wrench, Clock } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import type { LocalBooking, LocalRoom } from '../global'
 
 const statusLabel: Record<string, string> = {
   available: 'Available',
@@ -27,18 +11,54 @@ const statusLabel: Record<string, string> = {
   reserved: 'Reserved',
 }
 
-const todayBookings = [
-  { id: 'BK-0041', guest: 'Arjun Kapoor', room: '109', type: 'Check-In', time: '14:00', status: 'confirmed' },
-  { id: 'BK-0039', guest: 'Meera Iyer', room: '103', type: 'Check-Out', time: '11:00', status: 'checkedin' },
-  { id: 'BK-0042', guest: 'Sanjay Gupta', room: '211', type: 'Check-In', time: '15:30', status: 'confirmed' },
-  { id: 'BK-0038', guest: 'Divya Reddy', room: '205', type: 'Check-Out', time: '12:00', status: 'pending' },
-]
-
 export default function Dashboard() {
+  const navigate = useNavigate()
+  const [rooms, setRooms] = useState<LocalRoom[]>([])
+  const [bookings, setBookings] = useState<LocalBooking[]>([])
+
+  const loadData = () => {
+    window.electronAPI.db.getRooms().then(setRooms)
+    window.electronAPI.db.getBookings().then(setBookings)
+  }
+
+  useEffect(() => {
+    loadData()
+    const interval = setInterval(loadData, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
   const available = rooms.filter(r => r.status === 'available').length
   const occupied = rooms.filter(r => r.status === 'occupied').length
   const checkouts = rooms.filter(r => r.status === 'checkout').length
   const maintenance = rooms.filter(r => r.status === 'maintenance').length
+
+  const todayStr = new Date().toISOString().split('T')[0]
+
+  // Filter bookings relevant to today's operations
+  // Check-ins: check-in is today & status is confirmed
+  // Check-outs: check-out is today & status is checkedin
+  const todayActivity = bookings.filter(b => {
+    const isTodayCheckin = b.check_in_date === todayStr && b.status === 'confirmed'
+    const isTodayCheckout = b.check_out_date === todayStr && b.status === 'checkedin'
+    return isTodayCheckin || isTodayCheckout
+  })
+
+  const handleActivityAction = async (booking: LocalBooking) => {
+    try {
+      if (booking.status === 'confirmed') {
+        // Process Check-In
+        await window.electronAPI.db.updateBookingStatus(booking.id, 'checkedin')
+        await window.electronAPI.db.updateRoomStatus(booking.room_id, 'occupied')
+      } else if (booking.status === 'checkedin') {
+        // Process Check-Out
+        await window.electronAPI.db.updateBookingStatus(booking.id, 'checkedout')
+        await window.electronAPI.db.updateRoomStatus(booking.room_id, 'checkout')
+      }
+      loadData()
+    } catch (err) {
+      console.error('Failed to update status from dashboard:', err)
+    }
+  }
 
   return (
     <>
@@ -47,7 +67,7 @@ export default function Dashboard() {
           <div className="page-title">Dashboard</div>
           <div className="page-subtitle">Welcome back · Today's overview</div>
         </div>
-        <button className="btn btn-primary">
+        <button className="btn btn-primary" onClick={() => navigate('/bookings')}>
           <CalendarCheck size={15} />
           New Booking
         </button>
@@ -55,7 +75,7 @@ export default function Dashboard() {
 
       {/* Stats */}
       <div className="stats-grid">
-        <div className="stat-card success">
+        <div className="stat-card success" onClick={() => navigate('/rooms')} style={{ cursor: 'pointer' }}>
           <div className="stat-header">
             <span className="stat-label">Available</span>
             <div className="stat-icon success"><BedDouble size={16} /></div>
@@ -63,15 +83,15 @@ export default function Dashboard() {
           <div className="stat-value">{available}</div>
           <div className="stat-change">Rooms ready to book</div>
         </div>
-        <div className="stat-card accent">
+        <div className="stat-card accent" onClick={() => navigate('/rooms')} style={{ cursor: 'pointer' }}>
           <div className="stat-header">
             <span className="stat-label">Occupied</span>
             <div className="stat-icon accent"><Users size={16} /></div>
           </div>
           <div className="stat-value">{occupied}</div>
-          <div className="stat-change"><span>↑ 12%</span> vs yesterday</div>
+          <div className="stat-change">In-house guests</div>
         </div>
-        <div className="stat-card warning">
+        <div className="stat-card warning" onClick={() => navigate('/checkout')} style={{ cursor: 'pointer' }}>
           <div className="stat-header">
             <span className="stat-label">Due Checkout</span>
             <div className="stat-icon warning"><LogOut size={16} /></div>
@@ -79,7 +99,7 @@ export default function Dashboard() {
           <div className="stat-value">{checkouts}</div>
           <div className="stat-change">By 12:00 PM today</div>
         </div>
-        <div className="stat-card danger">
+        <div className="stat-card danger" onClick={() => navigate('/rooms')} style={{ cursor: 'pointer' }}>
           <div className="stat-header">
             <span className="stat-label">Maintenance</span>
             <div className="stat-icon danger"><Wrench size={16} /></div>
@@ -109,11 +129,10 @@ export default function Dashboard() {
         </div>
         <div className="room-grid">
           {rooms.map(room => (
-            <div key={room.number} className={`room-card ${room.status}`}>
+            <div key={room.number} className={`room-card ${room.status}`} onClick={() => navigate('/rooms')}>
               <div className="room-number">{room.number}</div>
-              <div className="room-type">{room.type}</div>
+              <div className="room-type">{room.type_name}</div>
               <div className={`room-status-badge ${room.status}`}>{statusLabel[room.status]}</div>
-              {room.guest && <div className="room-guest">{room.guest}</div>}
             </div>
           ))}
         </div>
@@ -135,36 +154,42 @@ export default function Dashboard() {
                 <th>Guest</th>
                 <th>Room</th>
                 <th>Type</th>
-                <th>Time</th>
                 <th>Status</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              {todayBookings.map(b => (
+              {todayActivity.map(b => (
                 <tr key={b.id}>
                   <td className="font-mono" style={{ color: 'var(--accent)', fontSize: 12 }}>{b.id}</td>
-                  <td className="primary">{b.guest}</td>
-                  <td>Room {b.room}</td>
+                  <td className="primary">{b.guest_name}</td>
+                  <td>Room {rooms.find(r => r.id === b.room_id)?.number || '—'}</td>
                   <td>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      {b.type === 'Check-In'
+                      {b.status === 'confirmed'
                         ? <LogIn size={13} color="var(--success)" />
                         : <LogOut size={13} color="var(--warning)" />}
-                      {b.type}
+                      {b.status === 'confirmed' ? 'Check-In' : 'Check-Out'}
                     </span>
                   </td>
-                  <td>{b.time}</td>
-                  <td><span className={`badge ${b.status}`}>{b.status.charAt(0).toUpperCase() + b.status.slice(1)}</span></td>
                   <td>
-                    <button className="btn btn-secondary btn-sm">
-                      {b.type === 'Check-In' ? 'Check In' : 'Check Out'}
+                    <span className={`badge ${b.status}`}>{b.status.charAt(0).toUpperCase() + b.status.slice(1)}</span>
+                  </td>
+                  <td>
+                    <button className="btn btn-secondary btn-sm" onClick={() => handleActivityAction(b)}>
+                      {b.status === 'confirmed' ? 'Check In' : 'Check Out'}
                     </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {todayActivity.length === 0 && (
+            <div className="empty-state">
+              <Clock size={32} />
+              <p>No activity scheduled for today</p>
+            </div>
+          )}
         </div>
       </div>
     </>

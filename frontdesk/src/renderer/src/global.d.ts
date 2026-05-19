@@ -50,6 +50,8 @@ declare global {
         upsertRooms: (rooms: LocalRoom[]) => Promise<void>;
         getSyncQueue: () => Promise<SyncQueueItem[]>;
         clearSyncQueueItem: (id: number) => Promise<void>;
+        updateBookingStatus: (id: string, status: string) => Promise<{ id: string; status: string }>;
+        updateRoomStatus: (id: string, status: string) => Promise<{ id: string; status: string }>;
       }
     }
   }

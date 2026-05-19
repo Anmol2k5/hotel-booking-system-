@@ -1,34 +1,70 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { LogIn, Search, CheckCircle } from 'lucide-react'
-
-const arrivals = [
-  { id: 'BK-0041', guest: 'Arjun Kapoor', phone: '+91 98765 43210', room: '109', type: 'Deluxe', checkin: '2026-05-06', checkout: '2026-05-09', nights: 3, amount: '₹12,600', adults: 2, children: 0, paid: true },
-  { id: 'BK-0042', guest: 'Sanjay Gupta', phone: '+91 87654 32101', room: '211', type: 'Standard', checkin: '2026-05-06', checkout: '2026-05-08', nights: 2, amount: '₹6,800', adults: 1, children: 0, paid: false },
-  { id: 'BK-0043', guest: 'Lakshmi Narayan', phone: '+91 76543 21092', room: '305', type: 'Suite', checkin: '2026-05-06', checkout: '2026-05-10', nights: 4, amount: '₹32,000', adults: 2, children: 1, paid: true },
-]
+import type { LocalBooking, LocalRoom } from '../global'
 
 export default function CheckIn() {
   const [selected, setSelected] = useState<string | null>(null)
-  const [done, setDone] = useState<string[]>([])
   const [search, setSearch] = useState('')
+  const [bookings, setBookings] = useState<LocalBooking[]>([])
+  const [rooms, setRooms] = useState<LocalRoom[]>([])
+
+  const loadData = () => {
+    window.electronAPI.db.getBookings().then(setBookings)
+    window.electronAPI.db.getRooms().then(setRooms)
+  }
+
+  useEffect(() => {
+    loadData()
+    const interval = setInterval(loadData, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Filter bookings that are 'confirmed' (ready to check in)
+  const arrivals = bookings.filter(b => b.status === 'confirmed')
 
   const filtered = arrivals.filter(a =>
-    a.guest.toLowerCase().includes(search.toLowerCase()) || a.id.includes(search)
+    a.guest_name.toLowerCase().includes(search.toLowerCase()) || a.id.includes(search)
   )
 
-  const handleCheckIn = (id: string) => {
-    setDone(prev => [...prev, id])
-    setSelected(null)
+  const handleCheckIn = async (bookingId: string, roomId: string) => {
+    try {
+      // 1. Update booking status to 'checkedin'
+      await window.electronAPI.db.updateBookingStatus(bookingId, 'checkedin')
+      // 2. Update room status to 'occupied'
+      await window.electronAPI.db.updateRoomStatus(roomId, 'occupied')
+      
+      setSelected(null)
+      loadData()
+    } catch (err) {
+      console.error('Failed to check in:', err)
+      alert('Error saving check-in offline')
+    }
   }
 
   const selectedBooking = arrivals.find(a => a.id === selected)
+
+  const getRoomNumber = (roomId: string) => {
+    const room = rooms.find(r => r.id === roomId)
+    return room ? room.number : '—'
+  }
+
+  const getRoomType = (roomId: string) => {
+    const room = rooms.find(r => r.id === roomId)
+    return room ? room.type_name : '—'
+  }
+
+  const getStayNights = (checkin: string, checkout: string) => {
+    const checkIn = new Date(checkin)
+    const checkOut = new Date(checkout)
+    return Math.max(1, Math.round((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)))
+  }
 
   return (
     <>
       <div className="page-header">
         <div>
           <div className="page-title">Check In</div>
-          <div className="page-subtitle">{arrivals.length} arrivals today</div>
+          <div className="page-subtitle">{arrivals.length} arrivals pending today</div>
         </div>
         <div className="search-bar">
           <Search size={14} />
@@ -47,42 +83,52 @@ export default function CheckIn() {
                 <th>Stay</th>
                 <th>Guests</th>
                 <th>Amount</th>
-                <th>Payment</th>
+                <th>Source</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map(a => (
-                <tr key={a.id} onClick={() => setSelected(a.id)} style={{ cursor: 'pointer', opacity: done.includes(a.id) ? 0.4 : 1 }}>
-                  <td className="font-mono" style={{ color: 'var(--accent)', fontSize: 12 }}>{a.id}</td>
-                  <td>
-                    <div className="primary">{a.guest}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.phone}</div>
-                  </td>
-                  <td>
-                    <div className="primary">{a.room}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.type}</div>
-                  </td>
-                  <td>{a.checkin} → {a.checkout}</td>
-                  <td>{a.adults}A {a.children > 0 ? `${a.children}C` : ''}</td>
-                  <td className="primary">{a.amount}</td>
-                  <td>
-                    <span className={`badge ${a.paid ? 'confirmed' : 'pending'}`}>
-                      {a.paid ? 'Paid' : 'Pending'}
-                    </span>
-                  </td>
-                  <td>
-                    {done.includes(a.id)
-                      ? <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--success)', fontSize: 12 }}><CheckCircle size={13} /> Done</span>
-                      : <button className="btn btn-success btn-sm" onClick={e => { e.stopPropagation(); handleCheckIn(a.id) }}>
-                          <LogIn size={12} /> Check In
-                        </button>
-                    }
-                  </td>
-                </tr>
-              ))}
+              {filtered.map(a => {
+                const nights = getStayNights(a.check_in_date, a.check_out_date)
+                return (
+                  <tr key={a.id} onClick={() => setSelected(a.id)} style={{ cursor: 'pointer' }}>
+                    <td className="font-mono" style={{ color: 'var(--accent)', fontSize: 12 }}>{a.id}</td>
+                    <td>
+                      <div className="primary">{a.guest_name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.guest_phone}</div>
+                    </td>
+                    <td>
+                      <div className="primary">Room {getRoomNumber(a.room_id)}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{getRoomType(a.room_id)}</div>
+                    </td>
+                    <td>{a.check_in_date} → {a.check_out_date}</td>
+                    <td>{a.adults}A {a.children > 0 ? `${a.children}C` : ''}</td>
+                    <td className="primary">₹{(a.room_rate * nights).toLocaleString('en-IN')}</td>
+                    <td>
+                      <span style={{
+                        fontSize: 11,
+                        padding: '2px 8px',
+                        borderRadius: 99,
+                        background: 'rgba(255,255,255,0.05)',
+                        color: 'var(--text-muted)'
+                      }}>{a.source}</span>
+                    </td>
+                    <td>
+                      <button className="btn btn-success btn-sm" onClick={e => { e.stopPropagation(); handleCheckIn(a.id, a.room_id) }}>
+                        <LogIn size={12} /> Check In
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
+          {filtered.length === 0 && (
+            <div className="empty-state">
+              <Search size={32} />
+              <p>No arrivals found</p>
+            </div>
+          )}
         </div>
 
         {selectedBooking && (
@@ -90,23 +136,23 @@ export default function CheckIn() {
             <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 16, fontWeight: 700 }}>Guest Details</div>
 
             <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-sm)', padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>{selectedBooking.guest}</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{selectedBooking.phone}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>{selectedBooking.guest_name}</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{selectedBooking.guest_phone}</div>
               <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                <span className={`badge ${selectedBooking.paid ? 'confirmed' : 'pending'}`}>
-                  {selectedBooking.paid ? '✓ Payment Cleared' : '⚠ Payment Pending'}
+                <span className="badge confirmed">
+                  ✓ Booking Confirmed
                 </span>
               </div>
             </div>
 
             {[
               ['Booking ID', selectedBooking.id],
-              ['Room', `${selectedBooking.room} · ${selectedBooking.type}`],
-              ['Check-In', selectedBooking.checkin],
-              ['Check-Out', selectedBooking.checkout],
-              ['Duration', `${selectedBooking.nights} Nights`],
+              ['Room', `Room ${getRoomNumber(selectedBooking.room_id)} · ${getRoomType(selectedBooking.room_id)}`],
+              ['Check-In', selectedBooking.check_in_date],
+              ['Check-Out', selectedBooking.check_out_date],
+              ['Duration', `${getStayNights(selectedBooking.check_in_date, selectedBooking.check_out_date)} Nights`],
               ['Guests', `${selectedBooking.adults} Adults${selectedBooking.children ? `, ${selectedBooking.children} Children` : ''}`],
-              ['Total Amount', selectedBooking.amount],
+              ['Total Amount', `₹${(selectedBooking.room_rate * getStayNights(selectedBooking.check_in_date, selectedBooking.check_out_date)).toLocaleString('en-IN')}`],
             ].map(([label, value]) => (
               <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
                 <span style={{ color: 'var(--text-muted)' }}>{label}</span>
@@ -116,7 +162,7 @@ export default function CheckIn() {
 
             <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: 14, display: 'flex', gap: 8 }}>
               <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => setSelected(null)}>Cancel</button>
-              <button className="btn btn-success" style={{ flex: 2 }} onClick={() => handleCheckIn(selectedBooking.id)}>
+              <button className="btn btn-success" style={{ flex: 2 }} onClick={() => handleCheckIn(selectedBooking.id, selectedBooking.room_id)}>
                 <LogIn size={14} /> Confirm Check-In
               </button>
             </div>
