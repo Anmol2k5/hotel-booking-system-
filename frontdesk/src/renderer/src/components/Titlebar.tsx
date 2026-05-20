@@ -1,15 +1,5 @@
 import { Minus, Square, X } from 'lucide-react'
 
-declare global {
-  interface Window {
-    electronAPI?: {
-      minimizeWindow: () => void
-      maximizeWindow: () => void
-      closeWindow: () => void
-    }
-  }
-}
-
 export default function Titlebar() {
   return (
     <div className="titlebar">

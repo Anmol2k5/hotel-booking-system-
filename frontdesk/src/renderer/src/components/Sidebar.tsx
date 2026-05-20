@@ -8,8 +8,8 @@ import { format } from 'date-fns'
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/bookings', icon: CalendarDays, label: 'Bookings', badge: 3 },
-  { to: '/checkin', icon: LogIn, label: 'Check In', badge: 2 },
+  { to: '/bookings', icon: CalendarDays, label: 'Bookings' },
+  { to: '/checkin', icon: LogIn, label: 'Check In' },
   { to: '/checkout', icon: LogOut, label: 'Check Out' },
   { to: '/guests', icon: Users, label: 'Guests' },
   { to: '/rooms', icon: BedDouble, label: 'Rooms' },
@@ -27,7 +27,7 @@ export default function Sidebar() {
     <aside className="sidebar">
       <span className="sidebar-section-label">Navigation</span>
 
-      {navItems.map(({ to, icon: Icon, label, badge }) => (
+      {navItems.map(({ to, icon: Icon, label }) => (
         <NavLink
           key={to}
           to={to}
@@ -35,20 +35,14 @@ export default function Sidebar() {
         >
           <Icon className="nav-icon" size={16} />
           {label}
-          {badge ? <span className="nav-badge">{badge}</span> : null}
         </NavLink>
       ))}
 
       <span className="sidebar-section-label" style={{ marginTop: 8 }}>System</span>
-      <div className="nav-item">
-        <Bell className="nav-icon" size={16} />
-        Notifications
-        <span className="nav-badge" style={{ background: 'var(--warning)' }}>5</span>
-      </div>
-      <div className="nav-item">
+      <NavLink to="/settings" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
         <Settings className="nav-icon" size={16} />
         Settings
-      </div>
+      </NavLink>
 
       <div className="sidebar-bottom">
         <div className="sidebar-clock">

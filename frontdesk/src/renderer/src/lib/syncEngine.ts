@@ -1,45 +1,33 @@
 import { supabase, PROPERTY_ID, DEVICE_ID } from './supabase'
 
-// Helper functions to map local frontend values to remote Supabase constraint values
-const mapSource = (src: string): string => {
-  const s = src.toLowerCase().trim()
-  if (s === 'direct') return 'direct'
-  if (s === 'walk-in' || s === 'walk_in') return 'walk_in'
-  if (s === 'booking.com' || s === 'booking_com') return 'booking_com'
-  if (s === 'makemytrip') return 'makemytrip'
-  if (s === 'airbnb') return 'airbnb'
-  return 'other'
-}
-
-const mapStatus = (st: string): string => {
-  const s = st.toLowerCase().trim()
-  if (s === 'confirmed') return 'confirmed'
-  if (s === 'checkedin' || s === 'checked_in') return 'checked_in'
-  if (s === 'checkedout' || s === 'checked_out') return 'checked_out'
-  if (s === 'cancelled') return 'cancelled'
-  return 'confirmed'
-}
-
-const mapRoomStatus = (st: string): string => {
-  const s = st.toLowerCase().trim()
-  if (s === 'available') return 'available'
-  if (s === 'occupied') return 'occupied'
-  if (s === 'maintenance') return 'maintenance'
-  if (s === 'blocked') return 'blocked'
-  if (s === 'reserved') return 'available'
-  if (s === 'checkout') return 'available'
-  return 'available'
-}
-
 export class SyncEngine {
+  static isOnline = navigator.onLine
+  static syncCount = 0
+
+  static initListeners() {
+    window.addEventListener('online', () => {
+      this.isOnline = true
+      console.log('[Sync] Back online. Triggering sync...')
+      this.pushPendingChanges()
+      this.pullInitialData()
+    })
+    window.addEventListener('offline', () => {
+      this.isOnline = false
+      console.log('[Sync] Offline. Changes will be queued.')
+    })
+  }
+
   // 1. Pull data from server into local SQLite
   static async pullInitialData() {
+    if (!this.isOnline) return
+
     try {
+      // Pull rooms
       const { data: rooms } = await supabase
         .from('rooms')
         .select('*, room_types(name, base_rate)')
         .eq('property_id', PROPERTY_ID)
-        
+
       if (rooms) {
         const mappedRooms = rooms.map(r => ({
           id: r.id,
@@ -48,11 +36,86 @@ export class SyncEngine {
           number: r.number,
           floor: r.floor,
           status: r.status,
-          type_name: r.room_types.name,
-          rate: r.room_types.base_rate
+          type_name: r.room_types?.name || 'Standard',
+          rate: r.room_types?.base_rate || 0,
+          amenities: r.amenities || '',
+          updated_at: new Date().toISOString()
         }))
         await window.electronAPI.db.upsertRooms(mappedRooms)
         console.log(`[Sync] Pulled ${mappedRooms.length} rooms.`)
+      }
+
+      // Pull guests
+      const { data: guests } = await supabase
+        .from('guests')
+        .select('*')
+        .eq('property_id', PROPERTY_ID)
+
+      if (guests) {
+        for (const g of guests) {
+          const existing = await window.electronAPI.db.getGuestById(g.id)
+          if (!existing) {
+            await window.electronAPI.db.createGuest({
+              id: g.id,
+              property_id: g.property_id,
+              first_name: g.first_name,
+              last_name: g.last_name,
+              phone: g.phone,
+              email: g.email || '',
+              id_type: g.id_type || '',
+              id_number: g.id_number || '',
+              address: g.address || '',
+              city: g.city || '',
+              country: g.country || 'IN',
+              vip: g.vip ? 1 : 0,
+              total_stays: g.total_stays || 0,
+              total_spent: g.total_spent || 0,
+              created_at: g.created_at || new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+          }
+        }
+        console.log(`[Sync] Pulled ${guests.length} guests.`)
+      }
+
+      // Pull confirmed bookings
+      const { data: bookings } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('property_id', PROPERTY_ID)
+        .in('status', ['confirmed', 'checkedin'])
+
+      if (bookings) {
+        for (const b of bookings) {
+          const existing = await window.electronAPI.db.getBookingById(b.id)
+          if (!existing) {
+            await window.electronAPI.db.createBooking({
+              id: b.id,
+              booking_ref: b.booking_ref,
+              property_id: b.property_id,
+              room_id: b.room_id,
+              guest_id: b.guest_id,
+              guest_name: b.guest_name,
+              guest_phone: b.guest_phone,
+              guest_email: b.guest_email || '',
+              check_in_date: b.check_in_date,
+              check_out_date: b.check_out_date,
+              adults: b.adults,
+              children: b.children,
+              room_rate: b.room_rate,
+              base_amount: b.base_amount || 0,
+              tax_amount: b.tax_amount || 0,
+              extras_amount: b.extras_amount || 0,
+              total_amount: b.total_amount,
+              status: b.status,
+              source: b.source,
+              notes: b.notes || '',
+              created_at: b.created_at || new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+          }
+        }
+        console.log(`[Sync] Pulled ${bookings.length} bookings.`)
       }
     } catch (e) {
       console.error('[Sync] Error pulling initial data:', e)
@@ -61,75 +124,72 @@ export class SyncEngine {
 
   // 2. Push offline actions to server
   static async pushPendingChanges() {
+    if (!this.isOnline) return
+
     try {
       const queue = await window.electronAPI.db.getSyncQueue()
       if (queue.length === 0) return
 
       console.log(`[Sync] Processing ${queue.length} pending items...`)
-      
+
       for (const item of queue) {
-        if (item.action === 'INSERT' && item.table_name === 'bookings') {
-          const booking = JSON.parse(item.payload)
-          
-          // Push to booking_intents table for conflict resolution
-          const { error } = await supabase
-            .from('booking_intents')
-            .insert({
-              local_id: booking.id,
-              property_id: booking.property_id,
-              room_id: booking.room_id,
-              guest_data: { name: booking.guest_name, phone: booking.guest_phone },
-              check_in_date: booking.check_in_date,
-              check_out_date: booking.check_out_date,
-              adults: booking.adults,
-              children: booking.children,
-              room_rate: booking.room_rate,
-              source: mapSource(booking.source),
-              status: mapStatus(booking.status),
-              created_offline_at: booking.created_at,
-              device_id: DEVICE_ID
-            })
+        try {
+          if (item.action === 'INSERT' && item.table_name === 'bookings') {
+            const booking = JSON.parse(item.payload)
 
-          if (error) {
-            console.error('[Sync] Failed to push intent:', error)
-          } else {
-            await window.electronAPI.db.clearSyncQueueItem(item.id)
-            console.log(`[Sync] Successfully pushed intent for local booking ${booking.id}`)
+            const { error } = await supabase
+              .from('booking_intents')
+              .insert({
+                local_id: booking.id,
+                property_id: booking.property_id,
+                room_id: booking.room_id,
+                guest_data: { name: booking.guest_name, phone: booking.guest_phone },
+                check_in_date: booking.check_in_date,
+                check_out_date: booking.check_out_date,
+                adults: booking.adults,
+                children: booking.children,
+                room_rate: booking.room_rate,
+                source: booking.source,
+                created_offline_at: booking.created_at,
+                device_id: DEVICE_ID
+              })
+
+            if (error) {
+              console.error('[Sync] Failed to push booking intent:', error)
+            } else {
+              await window.electronAPI.db.clearSyncQueueItem(item.id)
+              console.log(`[Sync] Pushed intent for booking ${booking.id}`)
+            }
+          } else if (item.action === 'INSERT' && item.table_name === 'guests') {
+            const guest = JSON.parse(item.payload)
+
+            const { error } = await supabase
+              .from('guests')
+              .insert({
+                id: guest.id,
+                property_id: guest.property_id,
+                first_name: guest.first_name,
+                last_name: guest.last_name,
+                phone: guest.phone,
+                email: guest.email,
+                city: guest.city,
+                vip: guest.vip,
+                created_at: guest.created_at
+              })
+
+            if (error) {
+              console.error('[Sync] Failed to push guest:', error)
+            } else {
+              await window.electronAPI.db.clearSyncQueueItem(item.id)
+              console.log(`[Sync] Pushed guest ${guest.id}`)
+            }
           }
-        } else if (item.action === 'UPDATE' && item.table_name === 'bookings') {
-          const payload = JSON.parse(item.payload)
-          // Try to update the status in booking_intents and bookings
-          const { error: intentErr } = await supabase
-            .from('booking_intents')
-            .update({ status: mapStatus(payload.status) })
-            .eq('local_id', item.record_id)
-
-          const { error: bookingErr } = await supabase
-            .from('bookings')
-            .update({ status: mapStatus(payload.status) })
-            .eq('id', item.record_id)
-
-          if (intentErr && bookingErr) {
-            console.error('[Sync] Failed to update booking remotely:', intentErr, bookingErr)
-          } else {
-            await window.electronAPI.db.clearSyncQueueItem(item.id)
-            console.log(`[Sync] Successfully updated booking status for ${item.record_id} to ${payload.status}`)
-          }
-        } else if (item.action === 'UPDATE' && item.table_name === 'rooms') {
-          const payload = JSON.parse(item.payload)
-          const { error } = await supabase
-            .from('rooms')
-            .update({ status: mapRoomStatus(payload.status) })
-            .eq('id', item.record_id)
-
-          if (error) {
-            console.error('[Sync] Failed to update room status remotely:', error)
-          } else {
-            await window.electronAPI.db.clearSyncQueueItem(item.id)
-            console.log(`[Sync] Successfully updated room ${item.record_id} status to ${payload.status}`)
-          }
+        } catch (e) {
+          console.error(`[Sync] Failed to process queue item ${item.id}:`, e)
         }
       }
+
+      this.syncCount++
     } catch (e) {
       console.error('[Sync] Error pushing changes:', e)
     }
@@ -138,17 +198,23 @@ export class SyncEngine {
   // Set up repeating sync interval
   static startAutoSync(intervalMs = 15000) {
     console.log('[Sync] Starting auto-sync engine...')
-    
+    this.initListeners()
+
     // Immediate initial sync
     this.pullInitialData().then(() => this.pushPendingChanges())
-    
+
     setInterval(async () => {
-      // Check online status conceptually
-      if (navigator.onLine) {
+      if (this.isOnline) {
         await this.pushPendingChanges()
-        // Pull can be optimized using updated_at or real-time channels
         await this.pullInitialData()
       }
     }, intervalMs)
+  }
+
+  static getStatus() {
+    return {
+      online: this.isOnline,
+      syncCount: this.syncCount
+    }
   }
 }

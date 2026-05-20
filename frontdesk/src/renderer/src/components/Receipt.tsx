@@ -23,14 +23,15 @@ export default function Receipt({ data }: ReceiptProps) {
     hour: '2-digit', minute: '2-digit'
   })
 
-  // Strip non-numeric characters for calculation
-  const getAmount = (str: string) => parseInt(str.replace(/[^\d]/g, ''), 10)
-  
+  const getAmount = (str: string) => {
+    const num = parseFloat(str.replace(/[^\d.]/g, ''))
+    return isNaN(num) ? 0 : num
+  }
+
   const roomTotal = getAmount(data.roomCharge)
   const extrasTotal = getAmount(data.extras)
   const subtotal = roomTotal + extrasTotal
-  // Assuming total includes 12% GST, calculate base and tax
-  const tax = subtotal - Math.round(subtotal / 1.12)
+  const tax = Math.round(subtotal - subtotal / 1.12)
   const base = subtotal - tax
 
   return (
@@ -49,7 +50,7 @@ export default function Receipt({ data }: ReceiptProps) {
         </div>
         <div style={{ textAlign: 'right' }}>
           <h3 style={{ margin: '0 0 10px 0', color: '#333' }}>INVOICE DETAILS</h3>
-          <p style={{ margin: '0 0 5px 0' }}><strong>Invoice No:</strong> INV-{Math.floor(Math.random() * 10000)}</p>
+          <p style={{ margin: '0 0 5px 0' }}><strong>Invoice No:</strong> INV-{Date.now().toString().slice(-6)}</p>
           <p style={{ margin: '0 0 5px 0' }}><strong>Date:</strong> {issueDate}</p>
         </div>
       </div>

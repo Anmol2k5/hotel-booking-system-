@@ -1,7 +1,6 @@
+import { BedDouble, Users, LogIn, LogOut, TrendingUp, CalendarCheck, Wrench, Clock } from 'lucide-react'
 import { useState, useEffect } from 'react'
-import { BedDouble, Users, LogIn, LogOut, CalendarCheck, Wrench, Clock } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
-import type { LocalBooking, LocalRoom } from '../global'
+import type { LocalRoom, LocalBooking, AppStats } from '../global'
 
 const statusLabel: Record<string, string> = {
   available: 'Available',
@@ -12,52 +11,49 @@ const statusLabel: Record<string, string> = {
 }
 
 export default function Dashboard() {
-  const navigate = useNavigate()
+  const [stats, setStats] = useState<AppStats | null>(null)
   const [rooms, setRooms] = useState<LocalRoom[]>([])
-  const [bookings, setBookings] = useState<LocalBooking[]>([])
+  const [todayActivity, setTodayActivity] = useState<LocalBooking[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showNewBooking, setShowNewBooking] = useState(false)
 
-  const loadData = () => {
-    window.electronAPI.db.getRooms().then(setRooms)
-    window.electronAPI.db.getBookings().then(setBookings)
+  const loadData = async () => {
+    try {
+      const [s, r, checkIns, checkOuts] = await Promise.all([
+        window.electronAPI.db.getStats(),
+        window.electronAPI.db.getRooms(),
+        window.electronAPI.db.getTodayCheckIns(),
+        window.electronAPI.db.getTodayCheckOuts()
+      ])
+      setStats(s)
+      setRooms(r)
+      const activity = [
+        ...checkIns.map(b => ({ ...b, activityType: 'Check-In' as const })),
+        ...checkOuts.map(b => ({ ...b, activityType: 'Check-Out' as const }))
+      ].sort((a, b) => (a.check_in_date || '').localeCompare(b.check_in_date || ''))
+      setTodayActivity(activity as any)
+    } catch (e) {
+      console.error('Failed to load dashboard data:', e)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
     loadData()
-    const interval = setInterval(loadData, 5000)
-    return () => clearInterval(interval)
+    const iv = setInterval(loadData, 15000)
+    return () => clearInterval(iv)
   }, [])
 
-  const available = rooms.filter(r => r.status === 'available').length
-  const occupied = rooms.filter(r => r.status === 'occupied').length
-  const checkouts = rooms.filter(r => r.status === 'checkout').length
-  const maintenance = rooms.filter(r => r.status === 'maintenance').length
-
-  const todayStr = new Date().toISOString().split('T')[0]
-
-  // Filter bookings relevant to today's operations
-  // Check-ins: check-in is today & status is confirmed
-  // Check-outs: check-out is today & status is checkedin
-  const todayActivity = bookings.filter(b => {
-    const isTodayCheckin = b.check_in_date === todayStr && b.status === 'confirmed'
-    const isTodayCheckout = b.check_out_date === todayStr && b.status === 'checkedin'
-    return isTodayCheckin || isTodayCheckout
-  })
-
-  const handleActivityAction = async (booking: LocalBooking) => {
-    try {
-      if (booking.status === 'confirmed') {
-        // Process Check-In
-        await window.electronAPI.db.updateBookingStatus(booking.id, 'checkedin')
-        await window.electronAPI.db.updateRoomStatus(booking.room_id, 'occupied')
-      } else if (booking.status === 'checkedin') {
-        // Process Check-Out
-        await window.electronAPI.db.updateBookingStatus(booking.id, 'checkedout')
-        await window.electronAPI.db.updateRoomStatus(booking.room_id, 'checkout')
-      }
-      loadData()
-    } catch (err) {
-      console.error('Failed to update status from dashboard:', err)
-    }
+  if (loading) {
+    return (
+      <div className="page-header">
+        <div>
+          <div className="page-title">Dashboard</div>
+          <div className="page-subtitle">Loading...</div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -67,7 +63,7 @@ export default function Dashboard() {
           <div className="page-title">Dashboard</div>
           <div className="page-subtitle">Welcome back · Today's overview</div>
         </div>
-        <button className="btn btn-primary" onClick={() => navigate('/bookings')}>
+        <button className="btn btn-primary" onClick={() => setShowNewBooking(true)}>
           <CalendarCheck size={15} />
           New Booking
         </button>
@@ -75,36 +71,36 @@ export default function Dashboard() {
 
       {/* Stats */}
       <div className="stats-grid">
-        <div className="stat-card success" onClick={() => navigate('/rooms')} style={{ cursor: 'pointer' }}>
+        <div className="stat-card success">
           <div className="stat-header">
             <span className="stat-label">Available</span>
             <div className="stat-icon success"><BedDouble size={16} /></div>
           </div>
-          <div className="stat-value">{available}</div>
+          <div className="stat-value">{stats?.availableRooms ?? 0}</div>
           <div className="stat-change">Rooms ready to book</div>
         </div>
-        <div className="stat-card accent" onClick={() => navigate('/rooms')} style={{ cursor: 'pointer' }}>
+        <div className="stat-card accent">
           <div className="stat-header">
             <span className="stat-label">Occupied</span>
             <div className="stat-icon accent"><Users size={16} /></div>
           </div>
-          <div className="stat-value">{occupied}</div>
-          <div className="stat-change">In-house guests</div>
+          <div className="stat-value">{stats?.occupiedRooms ?? 0}</div>
+          <div className="stat-change">of {stats?.totalRooms ?? 0} total rooms</div>
         </div>
-        <div className="stat-card warning" onClick={() => navigate('/checkout')} style={{ cursor: 'pointer' }}>
+        <div className="stat-card warning">
           <div className="stat-header">
             <span className="stat-label">Due Checkout</span>
             <div className="stat-icon warning"><LogOut size={16} /></div>
           </div>
-          <div className="stat-value">{checkouts}</div>
-          <div className="stat-change">By 12:00 PM today</div>
+          <div className="stat-value">{stats?.checkoutRooms ?? 0}</div>
+          <div className="stat-change">{stats?.todayCheckOuts ?? 0} today</div>
         </div>
-        <div className="stat-card danger" onClick={() => navigate('/rooms')} style={{ cursor: 'pointer' }}>
+        <div className="stat-card danger">
           <div className="stat-header">
             <span className="stat-label">Maintenance</span>
             <div className="stat-icon danger"><Wrench size={16} /></div>
           </div>
-          <div className="stat-value">{maintenance}</div>
+          <div className="stat-value">{stats?.maintenanceRooms ?? 0}</div>
           <div className="stat-change">Under service</div>
         </div>
       </div>
@@ -129,12 +125,18 @@ export default function Dashboard() {
         </div>
         <div className="room-grid">
           {rooms.map(room => (
-            <div key={room.number} className={`room-card ${room.status}`} onClick={() => navigate('/rooms')}>
+            <div key={room.id} className={`room-card ${room.status}`}>
               <div className="room-number">{room.number}</div>
               <div className="room-type">{room.type_name}</div>
-              <div className={`room-status-badge ${room.status}`}>{statusLabel[room.status]}</div>
+              <div className={`room-status-badge ${room.status}`}>{statusLabel[room.status] || room.status}</div>
             </div>
           ))}
+          {rooms.length === 0 && (
+            <div className="empty-state">
+              <BedDouble size={32} />
+              <p>No rooms configured. Sync from server or add rooms.</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -143,7 +145,7 @@ export default function Dashboard() {
         <div className="section-header">
           <span className="section-title">Today's Activity</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12 }}>
-            <Clock size={13} /> Live updates
+            <Clock size={13} /> {stats?.todayCheckIns ?? 0} check-ins · {stats?.todayCheckOuts ?? 0} check-outs
           </div>
         </div>
         <div className="table-wrapper">
@@ -154,42 +156,40 @@ export default function Dashboard() {
                 <th>Guest</th>
                 <th>Room</th>
                 <th>Type</th>
+                <th>Time</th>
                 <th>Status</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              {todayActivity.map(b => (
+              {todayActivity.length > 0 ? todayActivity.map(b => (
                 <tr key={b.id}>
-                  <td className="font-mono" style={{ color: 'var(--accent)', fontSize: 12 }}>{b.id}</td>
+                  <td className="font-mono" style={{ color: 'var(--accent)', fontSize: 12 }}>{b.booking_ref}</td>
                   <td className="primary">{b.guest_name}</td>
-                  <td>Room {rooms.find(r => r.id === b.room_id)?.number || '—'}</td>
+                  <td>Room {b.room_id}</td>
                   <td>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      {b.status === 'confirmed'
+                      {b.activityType === 'Check-In'
                         ? <LogIn size={13} color="var(--success)" />
                         : <LogOut size={13} color="var(--warning)" />}
-                      {b.status === 'confirmed' ? 'Check-In' : 'Check-Out'}
+                      {b.activityType}
                     </span>
                   </td>
+                  <td>{b.activityType === 'Check-In' ? b.check_in_date : b.check_out_date}</td>
+                  <td><span className={`badge ${b.status}`}>{b.status.charAt(0).toUpperCase() + b.status.slice(1)}</span></td>
                   <td>
-                    <span className={`badge ${b.status}`}>{b.status.charAt(0).toUpperCase() + b.status.slice(1)}</span>
-                  </td>
-                  <td>
-                    <button className="btn btn-secondary btn-sm" onClick={() => handleActivityAction(b)}>
-                      {b.status === 'confirmed' ? 'Check In' : 'Check Out'}
+                    <button className="btn btn-secondary btn-sm" onClick={() => {
+                      window.location.hash = b.activityType === 'Check-In' ? '/checkin' : '/checkout'
+                    }}>
+                      {b.activityType === 'Check-In' ? 'Check In' : 'Check Out'}
                     </button>
                   </td>
                 </tr>
-              ))}
+              )) : (
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>No activity today</td></tr>
+              )}
             </tbody>
           </table>
-          {todayActivity.length === 0 && (
-            <div className="empty-state">
-              <Clock size={32} />
-              <p>No activity scheduled for today</p>
-            </div>
-          )}
         </div>
       </div>
     </>

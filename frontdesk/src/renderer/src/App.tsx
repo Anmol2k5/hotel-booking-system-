@@ -9,6 +9,7 @@ import CheckIn from './pages/CheckIn'
 import CheckOut from './pages/CheckOut'
 import Guests from './pages/Guests'
 import Rooms from './pages/Rooms'
+import Settings from './pages/Settings'
 
 export default function App() {
   useEffect(() => {
@@ -29,6 +30,7 @@ export default function App() {
             <Route path="/checkout" element={<CheckOut />} />
             <Route path="/guests" element={<Guests />} />
             <Route path="/rooms" element={<Rooms />} />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>
       </div>
